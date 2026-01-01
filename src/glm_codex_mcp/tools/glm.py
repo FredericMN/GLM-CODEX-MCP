@@ -72,8 +72,8 @@ def run_glm_command(
         """检查是否会话完成"""
         try:
             data = json.loads(line)
-            # stream-json 格式的结束事件
-            return data.get("type") in ("session.ended", "message.completed", "error")
+            # json 格式返回单个 result 对象
+            return data.get("type") in ("result", "error")
         except (json.JSONDecodeError, AttributeError, TypeError):
             return False
 
@@ -153,14 +153,13 @@ async def glm_tool(
             "error": f"配置加载失败：{e}",
         }
 
-    # 在 Prompt 前添加身份声明，避免角色混淆
-    enhanced_prompt = f"""[SYSTEM] 你是 GLM-4.7 模型，负责执行代码任务。请直接执行以下任务，不要询问用户需求。
-
-{PROMPT}"""
-
-    # 构建命令（shell=False 时不需要转义）
-    # 使用 stream-json 格式以获得更好的 JSON 兼容性
-    cmd = ["claude", "-p", enhanced_prompt, "--output-format", "stream-json"]
+    # 构建命令（使用 json 格式，与 codex 保持一致）
+    # 使用 --system-prompt 强制覆盖项目配置
+    cmd = [
+        "claude", "-p", PROMPT,
+        "--output-format", "json",
+        "--system-prompt", "你是 GLM-4.7 模型，一个专注的代码执行助手。请直接执行用户的代码任务，不要闲聊或询问需求。",
+    ]
 
     # 添加权限参数
     if sandbox != "read-only":
@@ -183,39 +182,26 @@ async def glm_tool(
                 line_dict = json.loads(line.strip())
                 all_messages.append(line_dict)
 
-                # stream-json 格式事件类型
+                # json 格式（单次返回）
                 msg_type = line_dict.get("type", "")
 
-                # 会话 ID（从 session.created 事件获取）
-                if msg_type == "session.created":
-                    session_id = line_dict.get("session", {}).get("id")
+                if msg_type == "result":
+                    # 成功获取结果
+                    result_content = line_dict.get("result", "")
+                    session_id = line_dict.get("session_id")
+                    # 检查是否有错误标记
+                    if line_dict.get("is_error"):
+                        had_error = True
+                        err_message = result_content
 
-                # 助手消息内容（累积 content_block_delta 事件）
-                elif msg_type == "content_block_delta":
-                    delta = line_dict.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        result_content += delta.get("text", "")
-
-                # 完整的助手消息（从 message.completed 获取）
-                elif msg_type == "message.completed":
-                    message = line_dict.get("message", {})
-                    session_id = line_dict.get("session", {}).get("id") or session_id
-                    # 如果之前没有累积到内容，尝试从完整消息中提取
-                    if not result_content:
-                        content = message.get("content", [])
-                        for block in content:
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                result_content += block.get("text", "")
-
-                # 错误事件
                 elif msg_type == "error":
+                    # 错误事件
                     had_error = True
                     error_data = line_dict.get("error", {})
                     err_message = error_data.get("message", str(line_dict))
 
             except json.JSONDecodeError:
-                # stream-json 可能包含非 JSON 的状态信息，忽略
-                # 只在完全没有有效输出时才记录为错误
+                # 忽略非 JSON 行（可能是进度信息）
                 continue
 
             except Exception as error:
@@ -237,7 +223,7 @@ async def glm_tool(
     # 验证结果
     if session_id is None:
         success = False
-        err_message = "未能获取 SESSION_ID。可能 GLM API 未正确返回流式 JSON 事件。\n\n" + err_message
+        err_message = "未能获取 SESSION_ID。\n\n" + err_message
 
     if not result_content and success:
         success = False

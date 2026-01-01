@@ -41,35 +41,56 @@ GLM-CODEX-MCP 通过连接三大模型，构建了一个高效、低成本且高
 
 ### 协作流程图
 
-### 协作流程图
-
 ```mermaid
-graph TD
-    User(["👤 用户需求"]) --> Claude["🧠 Claude (Opus)<br>架构师 / 协调者"]
-
-    subgraph Execution ["⚡ 执行阶段"]
-        direction TB
-        Claude -- "1. 拆解 & Prompt" --> GLM["🔨 GLM-4.7<br>(代码执行)"]
-        GLM -- "2. 返回结果" --> Claude
+flowchart TB
+    subgraph UserLayer ["用户层"]
+        User(["👤 用户需求"])
     end
 
-    Claude -- "3. 初审" --> Check{"❓ 初审通过?"}
-    
-    Check -- "❌ No (明显问题)" --> ClaudeFix["🔧 Claude 直接修复"]
-    Check -- "✅ Yes" --> Codex
-    ClaudeFix --> Codex["⚖️ Codex<br>(独立审核)"]
-
-    subgraph Review ["🔍 审核阶段"]
-        direction TB
-        Codex -- "4. 深度 Review" --> ReviewResult{"❓ 审核结论?"}
-        ReviewResult -- "✅ 通过" --> Done(["🎉 任务完成"])
-        ReviewResult -- "⚠️ 建议优化" --> ClaudeOpt["✨ Claude 优化"]
-        ReviewResult -- "❌ 需要修改" --> RootCause{"❓ 问题根因"}
+    subgraph ClaudeLayer ["Claude (Opus) - 架构师"]
+        Claude["🧠 需求分析 & 任务拆解"]
+        Prompt["📝 构造精确 Prompt"]
+        Review["🔍 结果审查 & 决策"]
     end
 
-    ClaudeOpt --> Codex
-    RootCause -- "简单问题" --> ClaudeFix
-    RootCause -- "复杂问题" --> Claude
+    subgraph MCPLayer ["MCP 服务器"]
+        MCP{{"⚙️ GLM-CODEX-MCP"}}
+    end
+
+    subgraph ToolLayer ["执行层"]
+        GLM["🔨 GLM 工具<br><code>claude CLI → GLM-4.7</code><br>sandbox: workspace-write"]
+        Codex["⚖️ Codex 工具<br><code>codex CLI</code><br>sandbox: read-only"]
+    end
+
+    User --> Claude
+    Claude --> Prompt
+    Prompt -->|"glm(PROMPT, cd)"| MCP
+    MCP -->|"流式 JSON"| GLM
+    GLM -->|"SESSION_ID + result"| Review
+
+    Review -->|"需要审核"| MCP
+    MCP -->|"流式 JSON"| Codex
+    Codex -->|"SESSION_ID + 审核结论"| Review
+
+    Review -->|"✅ 通过"| Done(["🎉 任务完成"])
+    Review -->|"❌ 需修改"| Prompt
+    Review -->|"⚠️ 小优化"| Claude
+```
+
+**典型工作流**：
+
+```
+1. 用户提出需求
+       ↓
+2. Claude 分析、拆解任务，构造精确 Prompt
+       ↓
+3. 调用 glm 工具 → GLM-4.7 执行代码生成/修改
+       ↓
+4. Claude 审查结果，决定是否需要 Codex 审核
+       ↓
+5. 调用 codex 工具 → Codex 独立 Code Review
+       ↓
+6. 根据审核结论：通过 / 优化 / 重新执行
 ```
 
 ## 🚀 快速开始

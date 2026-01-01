@@ -41,22 +41,38 @@ GLM-CODEX-MCP 通过连接三大模型，构建了一个高效、低成本且高
 
 ### 协作流程图
 
-```mermaid
-graph TD
-    User[用户需求] --> Claude[Claude (Opus)]
-    Claude -- 1. 拆解任务 & 生成 Prompt --> GLM[GLM (执行者)]
-    GLM -- 2. 返回代码/结果 --> Claude
-    Claude -- 3. 初审 --> Check{初审通过?}
-    Check -- No (明显问题) --> ClaudeFix[Claude 直接修复]
-    Check -- Yes --> Codex[Codex (审核官)]
-    ClaudeFix --> Codex
-    Codex -- 4. 深度 Review --> Review{审核通过?}
-    Review -- Yes --> Done[任务完成]
-    Review -- ⚠️ 建议优化 --> ClaudeOpt[Claude 分析并优化]
-    Review -- ❌ 需要修改 --> RootCause{问题根因?}
-    ClaudeOpt --> Codex
-    RootCause -- 简单 --> ClaudeFix
-    RootCause -- 复杂 --> Claude
+### 协作流程图
+
+```text
+用户需求
+  │
+  ▼
+Claude (Opus) ────[1. 拆解 & Prompt]───▶ GLM (执行者)
+  │                                         │
+  │◀───────────[2. 返回结果]────────────────┘
+  │
+  ▼
+Claude (初审)
+  │
+  ├─❌ 有问题 ──▶ Claude (直接修复) ──┐
+  │                                  │
+  ▼ (✅ 通过)                         │
+  │                                  │
+Codex (审核官) ◀─────────────────────┘
+  │
+  ▼
+[深度 Review]
+  │
+  ├── ✅ 通过 ──────────────▶ 🎉 任务完成
+  │
+  ├── ⚠️ 建议优化 ──▶ Claude (优化) ────┐
+  │                                    │
+  └── ❌ 需要修改 ──▶ [问题根因?]        │
+                         │             │
+           ┌── [简单] ───┴── [复杂]     │
+           │                         │
+           ▼                         │
+      Claude (修复) ───────────────────┴──▶ 重新提交 Codex
 ```
 
 ## 🚀 快速开始

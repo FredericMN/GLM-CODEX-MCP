@@ -303,6 +303,8 @@ cp -r skills/glm-codex-workflow ~/.claude/skills/
 
 ## GLM-CODEX 协作
 
+**流程强制**：任何代码相关请求，必须先加载 `glm-codex-workflow` Skill 获取完整协作指南，再决定是否调用 GLM/Codex 工具。即便用户直接说"用 GLM"或"调用 Codex"，也必须先按 Skill 指南分析任务再执行调用。
+
 GLM 是你的代码执行者，Codex 是你的代码审核者。**所有代码决策权归你（Claude）所有**。
 
 当进行代码开发任务时，会自动触发 `glm-codex-workflow` Skill，提供详细协作指南。
@@ -355,6 +357,8 @@ GLM 是你的代码执行者，Codex 是你的代码审核者。**所有代码�
 # GLM-CODEX-MCP 协作指南
 
 ## 核心规则
+
+**流程强制**：任何代码相关请求，必须先按本指南分析任务再调用 GLM/Codex 工具。即便用户直接说"用 GLM"或"调用 Codex"，也必须先理解需求、遵循流程、再执行调用。
 
 GLM 是你的代码执行者，Codex 是你的代码审核者。**所有代码决策权归你（Claude）所有**。
 

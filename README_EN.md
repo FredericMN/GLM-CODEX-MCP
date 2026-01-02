@@ -258,6 +258,8 @@ cp -r skills/glm-codex-workflow ~/.claude/skills/
 
 ## GLM-CODEX Collaboration
 
+**Workflow Enforcement**: For any code-related request, you must first load the `glm-codex-workflow` Skill to get the complete collaboration guide, then decide whether to call GLM/Codex tools. Even if the user directly says "use GLM" or "call Codex", you must analyze the task according to the Skill guide before executing the call.
+
 GLM is your code executor, Codex is your code reviewer. **All code decisions belong to you (Claude)**.
 
 When performing code development tasks, the `glm-codex-workflow` Skill will automatically trigger.
@@ -270,9 +272,26 @@ When performing code development tasks, the `glm-codex-workflow` Skill will auto
 
 ### Core Principles
 
-1. GLM/Codex opinions are for reference only; you must judge independently
-2. Recommend calling Codex review after coding
-3. If Codex points out issues, fix and review again
+1. **All code tasks should be delegated to GLM for execution**, quickly verify results after GLM completes before moving to next task
+2. GLM/Codex opinions are for reference only; you must judge independently
+3. Recommend calling Codex review after coding
+4. If Codex points out issues, fix and review again
+
+### Retry and Error Handling
+
+- **Codex**: Allows 1 retry by default (read-only operations have no side effects)
+- **GLM**: No retry by default (has write side effects), can enable via `max_retries`
+- **Structured Errors**: Returns `error_kind` and `error_detail` on failure for troubleshooting
+
+### Pre-coding Preparation (Recommended)
+
+Before calling GLM for complex tasks, it's recommended to:
+1. Search for affected symbols/entry points globally (e.g., `grep "function_name" -r`)
+2. List all files that need modification
+3. Specify clear "fix/development checklist" in PROMPT
+4. **For complex tasks, consider discussing with Codex first to clarify the plan before delegating to GLM**
+
+This improves GLM's execution accuracy and reduces omissions.
 ```
 
 **Advantages**:
@@ -293,6 +312,8 @@ Add complete prompts directly to CLAUDE.md, loaded every conversation.
 # GLM-CODEX-MCP Collaboration Guide
 
 ## Core Rules
+
+**Workflow Enforcement**: For any code-related request, you must analyze the task according to this guide before calling GLM/Codex tools. Even if the user directly says "use GLM" or "call Codex", you must first understand the requirements, follow the workflow, then execute the call.
 
 GLM is your code executor, Codex is your code reviewer. **All code decisions belong to you (Claude)**.
 

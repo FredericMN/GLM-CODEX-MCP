@@ -7,16 +7,21 @@ description: |
   - 代码动作（中/英）：写/生成/新增/实现/改/修/优化/重构/补测试/格式化 | add/create/implement/fix/refactor/optimize/write code
   - 审核对象（中/英）：代码/改动/patch/diff/commit/PR 的 review | review code/diff/PR/commit
   - 技术对象：函数/类/模块/API/接口/脚本/配置（且意图是修改/实现）
-  - 上下文兜底：若对话上下文包含 code/diff/patch/commit，即触发
+  - 上下文兜底：若对话上下文包含代码类 diff/patch/commit（非文档类），即触发
 
-  不触发：
+  不触发（优先级高于触发条件）：
   - 仅讨论概念/架构/方案，不要求写改代码
-  - 文档审阅/非代码内容
+  - 文档审阅/非代码内容（如 markdown diff、README 修改）
   - 纯问答或解释性问题（无改动需求）
 
   模糊请求处理：
   - 若出现"看看/review/帮我改一下"且上下文含代码/改动 → 触发
   - 否则先询问是否需要实际改动/生成代码
+
+  直接点名处理：
+  - 即便用户直接说"用 GLM"或"调用 Codex"，也必须先按本指南分析任务再执行调用
+  - 先理解需求 → 遵循流程 → 再调用工具
+  - 用户点名时可覆盖"不触发"条件（用户明确意图优先）
 ---
 
 # GLM-Codex 协作流程

@@ -13,7 +13,7 @@
 
 让 **Claude (Opus)** 作为架构师调度 **GLM** 执行代码任务、**Codex** 审核代码质量，<br>形成**自动化的三方协作闭环**。
 
-[快速开始](#快速开始) • [核心特性](#核心特性) • [配置指南](#配置指南) • [工具详解](#工具详解)
+[快速开始](#快速开始) • [核心特性](#核心特性) • [架构说明](#架构说明) • [工具详解](#工具详解)
 
 </div>
 
@@ -29,6 +29,7 @@ GLM-CODEX-MCP 通过连接三大模型，构建了一个高效、低成本且高
 | **🧩 能力互补** | **Opus** 补足 **GLM** 的创造力短板，**Codex** 提供独立的第三方审核视角。 |
 | **🛡️ 质量保障** | 引入双重审核机制：**Claude 初审** + **Codex 终审**，确保代码健壮性。 |
 | **🔄 全自动闭环** | 支持 `拆解` → `执行` → `审核` → `重试` 的全自动流程，最大程度减少人工干预。 |
+| **🔧 灵活架构** | **Skills + MCP** 混合架构：MCP 提供工具能力，Skills 提供工作流指导，按需加载节约 Token。 |
 
 ## 🤖 角色分工与协作
 
@@ -140,7 +141,59 @@ model = "glm-4.7"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 ```
 
-### 4. 验证安装
+### 4. 安装 Skills（推荐）
+
+Skills 层提供工作流指导，确保 Claude 正确使用 MCP 工具。
+
+```bash
+# Windows (PowerShell)
+if (!(Test-Path "$env:USERPROFILE\.claude\skills")) { mkdir "$env:USERPROFILE\.claude\skills" }
+xcopy /E /I "skills\glm-codex-workflow" "$env:USERPROFILE\.claude\skills\glm-codex-workflow"
+
+# macOS/Linux
+mkdir -p ~/.claude/skills
+cp -r skills/glm-codex-workflow ~/.claude/skills/
+```
+
+### 5. 配置全局 Prompt（推荐）
+
+在 `~/.claude/CLAUDE.md` 中添加强制规则，确保 Claude 遵守协作流程：
+
+```markdown
+# GLM-CODEX 协作
+
+GLM 是代码执行者，Codex 是代码审核者。**所有决策权归 Claude 所有**。
+
+## 核心流程
+
+1. **GLM 执行**：所有改动任务委托 GLM 处理
+2. **Claude 验收**：GLM 完成后快速检查，有误自行修复
+3. **Codex 审核**：阶段性开发完成后调用 review，有误委托 GLM 修复，GLM 完成后再次进入 **Claude 验收**，持续迭代直至完全通过。
+
+## 强制规则
+
+- **默认协作**：所有代码/文档改动任务，**必须**委托 GLM 执行，阶段性完成后**必须**调用 Codex 审核
+- **跳过需确认**：若判断无需协作，**必须立即暂停**并报告：
+  > "这是一个简单的[描述]任务，我判断无需调用 GLM/Codex。是否同意？等待您的确认。"
+- **违规即终止**：未经确认跳过 GLM 执行或 Codex 审核 = **流程违规**
+
+## 快速参考
+
+| 工具 | 用途 | sandbox | 重试 |
+|------|------|---------|------|
+| GLM | 执行改动 | workspace-write | 默认不重试 |
+| Codex | 代码审核 | read-only | 默认 1 次 |
+
+**会话复用**：保存 `SESSION_ID` 保持上下文
+
+## 独立决策
+
+GLM/Codex 意见仅供参考。Claude 是最终决策者，需批判性思考。
+```
+
+> **说明**：纯 MCP 也能工作，但推荐 Skills + 全局 Prompt 配置以获得最佳体验。
+
+### 6. 验证安装
 
 运行以下命令检查 MCP 服务器状态：
 
@@ -153,7 +206,7 @@ claude mcp list
 glm-codex: ... - ✓ Connected
 ```
 
-### 5. (可选) 权限配置
+### 7. (可选) 权限配置
 
 为获得流畅体验，可在 `~/.claude/settings.json` 中添加自动授权：
 
@@ -303,84 +356,24 @@ glm-codex: ... - ✓ Connected
 }
 ```
 
-## 📝 提示词配置
+## 📚 架构说明
 
-本项目提供两种提示词配置方案，根据你的需求选择：
+### 三层配置架构
 
-| 方案 | 适用场景 | Token 消耗 | 配置复杂度 |
-|------|----------|-----------|-----------|
-| **Skill 方案** | 推荐，按需加载 | 低 | 需安装 Skill |
-| **传统方案** | 简单直接 | 较高 | 仅需编辑 CLAUDE.md |
+本项目采用 **MCP + Skills + 全局 Prompt** 混合架构，各层职责分明：
 
----
+| 层级 | 职责 | Token 消耗 | 必需性 |
+|------|------|-----------|--------|
+| **MCP 层** | 工具实现（类型安全、结构化错误、重试、metrics） | 固定（工具 schema） | **必需** |
+| **Skills 层** | 工作流指导（触发条件、流程、模板） | 按需加载 | 推荐 |
+| **全局 Prompt 层** | 强制规则（确保 Claude 遵守协作流程） | 固定（约 20 行） | 推荐 |
 
-### 方案一：Skill 方案（推荐）
+**为什么推荐完整配置？**
+- **纯 MCP**：工具可用，但 Claude 可能不理解何时/如何使用
+- **+ Skills**：Claude 学会工作流程，知道何时触发协作
+- **+ 全局 Prompt**：强制规则确保 Claude 始终遵守协作纪律
 
-使用 Claude Code Skill 实现按需加载，仅在代码任务时触发，节约 Token。
-
-**安装 Skill**：
-
-```bash
-# 复制 Skill 文件到 Claude Code 目录
-
-# Windows (PowerShell)
-if (!(Test-Path "$env:USERPROFILE\.claude\skills")) { mkdir "$env:USERPROFILE\.claude\skills" }
-xcopy /E /I "skills\glm-codex-workflow" "$env:USERPROFILE\.claude\skills\glm-codex-workflow"
-
-# macOS/Linux
-mkdir -p ~/.claude/skills
-cp -r skills/glm-codex-workflow ~/.claude/skills/
-```
-
-**配置精简版 CLAUDE.md**（添加到 `~/.claude/CLAUDE.md`）：
-
-```markdown
-# 全局协议
-
-## 强制规则
-
-- **默认协作**：所有代码/文档改动任务，**必须**委托 GLM 执行，阶段性完成后**必须**调用 Codex 审核
-- **跳过需确认**：若判断无需协作，**必须立即暂停**并报告：
-  > "这是一个简单的[描述]任务，我判断无需调用 GLM/Codex。是否同意？等待您的确认。"
-- **违规即终止**：未经确认跳过 GLM 执行或 Codex 审核 = **流程违规**
-- 除极个别特殊情况外，始终**强制**与 GLM/Codex 协作（MCP 工具：`mcp__glm-codex__glm(PROMPT, cd)` / `mcp__glm-codex__codex(PROMPT, cd)`）
-
----
-
-# GLM-CODEX 协作
-
-GLM 是代码执行者，Codex 是代码审核者。**所有决策权归 Claude 所有**。
-
-## 核心流程
-
-1. **GLM 执行**：所有改动任务委托 GLM 处理
-2. **Claude 验收**：GLM 完成后快速检查，有误自行修复
-3. **Codex 审核**：阶段性开发完成后调用 review，有误委托 GLM 修复，GLM 完成后再次进入**Claude 验收**，持续迭代直至完全通过。
-
-## 快速参考
-
-| 工具 | 用途 | sandbox | 重试 |
-|------|------|---------|------|
-| GLM | 执行改动 | workspace-write | 默认不重试 |
-| Codex | 代码审核 | read-only | 默认 1 次 |
-
-**会话复用**：保存 `SESSION_ID` 保持上下文
-
-## 编码前准备（复杂任务）
-
-1. 搜索受影响的符号/入口点
-2. 列出需要修改的文件清单
-3. 复杂问题可先与 Codex 沟通方案
-
-## 独立决策
-
-GLM/Codex 意见仅供参考。Claude 是最终决策者，需批判性思考。
-```
-
-**优势**：
-- 非代码任务不加载协作指南（约 180 行 → 20 行，估算节约 ~80% Token）
-- 代码任务自动触发，无需手动调用
-- 详细规范按需读取，渐进式披露
+**Token 优化**：Skills 按需加载，非代码任务不加载工作流指导，可显著节约 Token
 
 ## 🧑‍💻 开发与贡献
 

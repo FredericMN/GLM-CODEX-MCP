@@ -13,7 +13,7 @@
 
 Empower **Claude (Opus)** as the architect to orchestrate **GLM** for code execution tasks and **Codex** for code quality review,<br>forming an **automated tripartite collaboration loop**.
 
-[Quick Start](#quick-start) • [Core Features](#core-features) • [Configuration](#configuration) • [Tools](#tools)
+[Quick Start](#quick-start) • [Core Features](#core-features) • [Architecture](#architecture) • [Tools Details](#tools-details)
 
 </div>
 
@@ -29,6 +29,7 @@ GLM-CODEX-MCP connects three major models to build an efficient, cost-effective,
 | **🧩 Complementary Capabilities** | **Opus** compensates for **GLM**'s creativity gaps, and **Codex** provides an independent third-party review perspective. |
 | **🛡️ Quality Assurance** | Introduces a dual-review mechanism: **Claude Initial Review** + **Codex Final Review** to ensure code robustness. |
 | **🔄 Fully Automated Loop** | Supports a fully automated flow of `Decompose` → `Execute` → `Review` → `Retry`, minimizing human intervention. |
+| **🔧 Flexible Architecture** | **Skills + MCP** hybrid architecture: MCP provides tool capabilities, Skills provides workflow guidance, on-demand loading saves tokens. |
 
 ## 🤖 Roles & Collaboration
 
@@ -140,7 +141,59 @@ model = "glm-4.7"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 ```
 
-### 4. Verify Installation
+### 4. Install Skills (Recommended)
+
+The Skills layer provides workflow guidance to ensure Claude uses MCP tools correctly.
+
+```bash
+# Windows (PowerShell)
+if (!(Test-Path "$env:USERPROFILE\.claude\skills")) { mkdir "$env:USERPROFILE\.claude\skills" }
+xcopy /E /I "skills\glm-codex-workflow" "$env:USERPROFILE\.claude\skills\glm-codex-workflow"
+
+# macOS/Linux
+mkdir -p ~/.claude/skills
+cp -r skills/glm-codex-workflow ~/.claude/skills/
+```
+
+### 5. Configure Global Prompt (Recommended)
+
+Add mandatory rules to `~/.claude/CLAUDE.md` to ensure Claude follows the collaboration workflow:
+
+```markdown
+# GLM-CODEX Collaboration
+
+GLM is the code executor, Codex is the code reviewer. **All decision-making authority belongs to Claude**.
+
+## Core Workflow
+
+1. **GLM Executes**: Delegate all modification tasks to GLM
+2. **Claude Verifies**: Quick check after GLM completes, fix issues yourself
+3. **Codex Reviews**: Call review after milestone development; if issues found, delegate to GLM for fixes, then re-enter **Claude Verifies**, iterate until fully passed.
+
+## Mandatory Rules
+
+- **Default Collaboration**: All code/document modification tasks **must** be delegated to GLM for execution, and **must** call Codex for review after milestone completion
+- **Skip Requires Confirmation**: If you determine collaboration is unnecessary, **must immediately pause** and report:
+  > "This is a simple [description] task, I judge GLM/Codex is not needed. Do you agree? Waiting for your confirmation."
+- **Violation = Termination**: Skipping GLM execution or Codex review without confirmation = **workflow violation**
+
+## Quick Reference
+
+| Tool | Purpose | sandbox | Retry |
+|------|---------|---------|-------|
+| GLM | Execute modifications | workspace-write | No retry by default |
+| Codex | Code review | read-only | 1 retry by default |
+
+**Session Reuse**: Save `SESSION_ID` to maintain context
+
+## Independent Decision
+
+GLM/Codex opinions are for reference only. Claude is the final decision maker, think critically.
+```
+
+> **Note**: Pure MCP works too, but Skills + Global Prompt configuration is recommended for the best experience.
+
+### 6. Verify Installation
 
 Run the following command to check MCP server status:
 
@@ -153,7 +206,7 @@ claude mcp list
 glm-codex: ... - ✓ Connected
 ```
 
-### 5. (Optional) Permission Configuration
+### 7. (Optional) Permission Configuration
 
 For a smoother experience, add automatic authorization in `~/.claude/settings.json`:
 
@@ -222,84 +275,105 @@ This project uses a **dual timeout protection** mechanism:
 - `idle_timeout`: Idle timeout (no output)
 - `timeout`: Total duration timeout
 
-## 📝 Prompt Configuration
+### Return Value Structure
 
-This project provides two prompt configuration options:
+```json
+// Success (default behavior, return_metrics=false)
+{
+  "success": true,
+  "tool": "glm",
+  "SESSION_ID": "uuid-string",
+  "result": "Response content"
+}
 
-| Option | Use Case | Token Usage | Setup Complexity |
-|--------|----------|-------------|------------------|
-| **Skill Option** | Recommended, on-demand loading | Low | Requires Skill installation |
-| **Traditional Option** | Simple and direct | Higher | Only edit CLAUDE.md |
+// Success (with metrics enabled, return_metrics=true)
+{
+  "success": true,
+  "tool": "glm",
+  "SESSION_ID": "uuid-string",
+  "result": "Response content",
+  "metrics": {
+    "ts_start": "2026-01-02T10:00:00.000Z",
+    "ts_end": "2026-01-02T10:00:05.123Z",
+    "duration_ms": 5123,
+    "tool": "glm",
+    "sandbox": "workspace-write",
+    "success": true,
+    "retries": 0,
+    "exit_code": 0,
+    "prompt_chars": 256,
+    "prompt_lines": 10,
+    "result_chars": 1024,
+    "result_lines": 50,
+    "raw_output_lines": 60,
+    "json_decode_errors": 0
+  }
+}
 
----
+// Failure (structured error, default behavior)
+{
+  "success": false,
+  "tool": "glm",
+  "error": "Error summary",
+  "error_kind": "idle_timeout | timeout | upstream_error | ...",
+  "error_detail": {
+    "message": "Error brief",
+    "exit_code": 1,
+    "last_lines": ["Last 20 lines of output..."],
+    "idle_timeout_s": 300,
+    "max_duration_s": 1800
+    // "retries": 1  // Only returned when retries > 0
+  }
+}
 
-### Option 1: Skill Option (Recommended)
-
-Uses Claude Code Skill for on-demand loading, only triggers during code tasks, saving tokens.
-
-**Install Skill**:
-
-```bash
-# Copy Skill files to Claude Code directory
-
-# Windows (PowerShell)
-if (!(Test-Path "$env:USERPROFILE\.claude\skills")) { mkdir "$env:USERPROFILE\.claude\skills" }
-xcopy /E /I "skills\glm-codex-workflow" "$env:USERPROFILE\.claude\skills\glm-codex-workflow"
-
-# macOS/Linux
-mkdir -p ~/.claude/skills
-cp -r skills/glm-codex-workflow ~/.claude/skills/
+// Failure (with metrics enabled, return_metrics=true)
+{
+  "success": false,
+  "tool": "glm",
+  "error": "Error summary",
+  "error_kind": "idle_timeout | timeout | upstream_error | ...",
+  "error_detail": {
+    "message": "Error brief",
+    "exit_code": 1,
+    "last_lines": ["Last 20 lines of output..."],
+    "idle_timeout_s": 300,
+    "max_duration_s": 1800
+    // "retries": 1  // Only returned when retries > 0
+  },
+  "metrics": {
+    "ts_start": "2026-01-02T10:00:00.000Z",
+    "ts_end": "2026-01-02T10:00:05.123Z",
+    "duration_ms": 5123,
+    "tool": "glm",
+    "sandbox": "workspace-write",
+    "success": false,
+    "retries": 0,
+    "exit_code": 1,
+    "prompt_chars": 256,
+    "prompt_lines": 10,
+    "json_decode_errors": 0
+  }
+}
 ```
 
-**Configure minimal CLAUDE.md** (add to `~/.claude/CLAUDE.md`):
+## 📚 Architecture
 
-```markdown
-# Global Protocols
+### Three-Layer Configuration Architecture
 
-## Mandatory Rules
+This project uses a **MCP + Skills + Global Prompt** hybrid architecture with clear separation of concerns:
 
-- **Default Collaboration**: All code/document modification tasks **must** be delegated to GLM for execution, and **must** call Codex for review after milestone completion
-- **Skip Requires Confirmation**: If you determine collaboration is unnecessary, **must immediately pause** and report:
-  > "This is a simple [description] task, I judge GLM/Codex is not needed. Do you agree? Waiting for your confirmation."
-- **Violation = Termination**: Skipping GLM execution or Codex review without confirmation = **workflow violation**
-- Except in rare special cases, always **mandatory** collaboration with GLM/Codex (MCP tools: `mcp__glm-codex__glm(PROMPT, cd)` / `mcp__glm-codex__codex(PROMPT, cd)`)
+| Layer | Responsibility | Token Usage | Required |
+|-------|----------------|-------------|----------|
+| **MCP Layer** | Tool implementation (type safety, structured errors, retry, metrics) | Fixed (tool schema) | **Required** |
+| **Skills Layer** | Workflow guidance (trigger conditions, process, templates) | On-demand loading | Recommended |
+| **Global Prompt Layer** | Mandatory rules (ensure Claude follows collaboration workflow) | Fixed (~20 lines) | Recommended |
 
----
+**Why is complete configuration recommended?**
+- **Pure MCP**: Tools available, but Claude may not understand when/how to use them
+- **+ Skills**: Claude learns the workflow, knows when to trigger collaboration
+- **+ Global Prompt**: Mandatory rules ensure Claude always follows collaboration discipline
 
-# GLM-CODEX Collaboration
-
-GLM is the code executor, Codex is the code reviewer. **All decision-making authority belongs to Claude**.
-
-## Core Workflow
-
-1. **GLM Executes**: Delegate all modification tasks to GLM
-2. **Claude Verifies**: Quick check after GLM completes, fix issues yourself
-3. **Codex Reviews**: Call review after milestone development; if issues found, delegate to GLM for fixes, then re-enter **Claude Verifies**, iterate until fully passed.
-
-## Quick Reference
-
-| Tool | Purpose | sandbox | Retry |
-|------|---------|---------|-------|
-| GLM | Execute modifications | workspace-write | No retry by default |
-| Codex | Code review | read-only | 1 retry by default |
-
-**Session Reuse**: Save `SESSION_ID` to maintain context
-
-## Pre-coding Preparation (Complex Tasks)
-
-1. Search for affected symbols/entry points
-2. List files that need modification
-3. Consult Codex for complex solutions first
-
-## Independent Decision
-
-GLM/Codex opinions are for reference only. Claude is the final decision maker, think critically.
-```
-
-**Advantages**:
-- Non-code tasks don't load collaboration guide (~180 lines → 20 lines, ~80% token savings)
-- Code tasks auto-trigger, no manual invocation needed
-- Detailed specs loaded on-demand, progressive disclosure
+**Token Optimization**: Skills load on-demand, non-code tasks don't load workflow guidance significantly reducing token usage
 
 ## 🧑‍💻 Development & Contribution
 

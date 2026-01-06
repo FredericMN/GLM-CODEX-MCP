@@ -197,6 +197,8 @@ Write-Step "Step 6: Configuring Coder..."
 $configDir = "$env:USERPROFILE\.ccg-mcp"
 $configPath = "$configDir\config.toml"
 
+$skipCoderConfig = $false
+
 try {
     # Create config directory if it doesn't exist
     if (!(Test-Path $configDir)) {
@@ -209,31 +211,32 @@ try {
         $overwrite = Read-Host "Overwrite? (y/N)"
         if ($overwrite -ne "y" -and $overwrite -ne "Y") {
             Write-WarningMsg "Skipping Coder configuration"
-            goto Done
+            $skipCoderConfig = $true
         }
     }
 
-    # Prompt for API Token (hidden input)
-    $apiToken = Read-Host "Enter your API Token" -MaskInput
-    if ([string]::IsNullOrWhiteSpace($apiToken)) {
-        Write-ErrorMsg "API Token is required"
-        exit 1
-    }
+    if (-not $skipCoderConfig) {
+        # Prompt for API Token (hidden input)
+        $apiToken = Read-Host "Enter your API Token" -MaskInput
+        if ([string]::IsNullOrWhiteSpace($apiToken)) {
+            Write-ErrorMsg "API Token is required"
+            exit 1
+        }
 
-    # Prompt for Base URL (optional)
-    $baseUrl = Read-Host "Enter Base URL (default: https://open.bigmodel.cn/api/anthropic)"
-    if ([string]::IsNullOrWhiteSpace($baseUrl)) {
-        $baseUrl = "https://open.bigmodel.cn/api/anthropic"
-    }
+        # Prompt for Base URL (optional)
+        $baseUrl = Read-Host "Enter Base URL (default: https://open.bigmodel.cn/api/anthropic)"
+        if ([string]::IsNullOrWhiteSpace($baseUrl)) {
+            $baseUrl = "https://open.bigmodel.cn/api/anthropic"
+        }
 
-    # Prompt for Model (optional)
-    $model = Read-Host "Enter Model (default: glm-4.7)"
-    if ([string]::IsNullOrWhiteSpace($model)) {
-        $model = "glm-4.7"
-    }
+        # Prompt for Model (optional)
+        $model = Read-Host "Enter Model (default: glm-4.7)"
+        if ([string]::IsNullOrWhiteSpace($model)) {
+            $model = "glm-4.7"
+        }
 
-    # Generate config.toml
-    $configContent = @"
+        # Generate config.toml
+        $configContent = @"
 [coder]
 api_token = "$apiToken"
 base_url = "$baseUrl"
@@ -243,23 +246,22 @@ model = "$model"
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 "@
 
-    Set-Content -Path $configPath -Value $configContent -Encoding UTF8
+        Set-Content -Path $configPath -Value $configContent -Encoding UTF8
 
-    # Set file permissions - only current user can read/write
-    $acl = Get-Acl $configPath
-    $acl.SetAccessRuleProtection($true, $false)
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
-    $acl.SetAccessRule($rule)
-    Set-Acl $configPath $acl
+        # Set file permissions - only current user can read/write
+        $acl = Get-Acl $configPath
+        $acl.SetAccessRuleProtection($true, $false)
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
+        $acl.SetAccessRule($rule)
+        Set-Acl $configPath $acl
 
-    Write-Success "Coder configuration saved to $configPath"
+        Write-Success "Coder configuration saved to $configPath"
+    }
 
 } catch {
     Write-ErrorMsg "Failed to configure Coder: $_"
     exit 1
 }
-
-:Done
 # ==============================================================================
 # Done!
 # ==============================================================================

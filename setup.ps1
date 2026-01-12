@@ -98,7 +98,7 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
 try {
     # Try to remove existing ccg MCP server if it exists
     try {
-        $null = claude mcp remove ccg --scope user 2>&1
+        $null = & claude @("mcp","remove","ccg","--scope","user") 2>&1
         Write-WarningMsg "Removed existing ccg MCP server"
     } catch {
         # Ignore if it doesn't exist
@@ -127,14 +127,14 @@ try {
 
     if ($useRefresh) {
         # Try with --refresh first
-        $refreshOutput = claude mcp add ccg --scope user --transport stdio -- uvx --refresh --from git+https://github.com/FredericMN/Coder-Codex-Gemini.git ccg-mcp 2>&1
+        $refreshOutput = & claude @("mcp","add","ccg","--scope","user","--transport","stdio","--","uvx","--refresh","--from","git+https://github.com/FredericMN/Coder-Codex-Gemini.git","ccg-mcp") 2>&1
         if ($LASTEXITCODE -eq 0) {
             $mcpRegistered = $true
             Write-Success "MCP server registered (with --refresh)"
         } elseif ($refreshOutput -match "(?i)(unknown|unrecognized|unexpected|invalid).*(option|flag|argument).*--refresh|--refresh.*(unknown|unrecognized|unexpected|invalid)") {
             # Fallback: --refresh was rejected (covers various CLI error message formats), try without it
             Write-WarningMsg "--refresh option was rejected, falling back to installation without --refresh..."
-            $fallbackOutput = claude mcp add ccg --scope user --transport stdio -- uvx --from git+https://github.com/FredericMN/Coder-Codex-Gemini.git ccg-mcp 2>&1
+            $fallbackOutput = & claude @("mcp","add","ccg","--scope","user","--transport","stdio","--","uvx","--from","git+https://github.com/FredericMN/Coder-Codex-Gemini.git","ccg-mcp") 2>&1
             if ($LASTEXITCODE -eq 0) {
                 $mcpRegistered = $true
                 Write-Success "MCP server registered (without --refresh)"
@@ -154,7 +154,7 @@ try {
         Write-WarningMsg "Installing without --refresh..."
         Write-WarningMsg "Consider upgrading uv: powershell -c `"irm https://astral.sh/uv/install.ps1 | iex`""
 
-        $fallbackOutput = claude mcp add ccg --scope user --transport stdio -- uvx --from git+https://github.com/FredericMN/Coder-Codex-Gemini.git ccg-mcp 2>&1
+        $fallbackOutput = & claude @("mcp","add","ccg","--scope","user","--transport","stdio","--","uvx","--from","git+https://github.com/FredericMN/Coder-Codex-Gemini.git","ccg-mcp") 2>&1
         if ($LASTEXITCODE -eq 0) {
             $mcpRegistered = $true
             Write-Success "MCP server registered (without --refresh)"

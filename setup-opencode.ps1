@@ -35,7 +35,8 @@ function Read-Password {
     param([string]$Prompt)
 
     # Check if -MaskInput is supported (PowerShell 7.1+)
-    if ($PSVersionTable.PSVersion.Major -ge 7 -and $PSVersionTable.PSVersion.Minor -ge 1) {
+    # Use -gt 7 to handle future versions (8.0+) correctly
+    if ($PSVersionTable.PSVersion.Major -gt 7 -or ($PSVersionTable.PSVersion.Major -eq 7 -and $PSVersionTable.PSVersion.Minor -ge 1)) {
         return Read-Host $Prompt -MaskInput
     } else {
         # Fallback for PowerShell 5.1 and earlier 7.x versions
@@ -253,7 +254,9 @@ function Configure-OpencodeJson {
         Write-WarningMsg "Please use 'opencode auth login' for OAuth authentication."
     }
 
-    Set-Content -Path $opencodeJson -Value $content -Encoding UTF8
+    # Write content with UTF-8 without BOM (critical for JSON parsers)
+    # PowerShell 5.x's "Set-Content -Encoding UTF8" writes BOM which may break JSON parsing
+    [System.IO.File]::WriteAllText($opencodeJson, $content, [System.Text.UTF8Encoding]::new($false))
 
     # Set file permissions - try to restrict to current user, but don't fail if ACL fails
     try {

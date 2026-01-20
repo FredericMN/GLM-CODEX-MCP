@@ -1,12 +1,12 @@
 """Coder 工具实现
 
-调用可配置的后端模型执行代码生成或修改任务。
-通过设置环境变量让 claude CLI 使用配置的模型后端（如 GLM-4.7、Minimax、DeepSeek 等）。
+调用 claude-glm (GLM-4.7) 执行代码生成或修改任务。
 """
 
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import subprocess
@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Annotated, Any, Dict, Generator, Iterator, Literal, Optional
 
 from pydantic import Field
-
-from ccg_mcp.config import build_coder_env, get_config
 
 
 # ============================================================================
@@ -173,15 +171,15 @@ def run_coder_command(
         CommandNotFoundError: claude CLI 未安装时抛出
         CommandTimeoutError: 命令执行超时时抛出
     """
-    # 查找 claude CLI 路径
-    claude_path = shutil.which('claude')
-    if not claude_path:
+    # 查找 claude-glm CLI 路径
+    claude_glm_path = shutil.which('claude-glm')
+    if not claude_glm_path:
         raise CommandNotFoundError(
-            "未找到 claude CLI。请确保已安装 Claude Code CLI 并添加到 PATH。\n"
-            "安装指南：https://docs.anthropic.com/en/docs/claude-code"
+            "未找到 claude-glm CLI。请确保已安装 claude-glm 并添加到 PATH。\n"
+            "安装方式：参考你的 claude-glm 封装项目"
         )
     popen_cmd = cmd.copy()
-    popen_cmd[0] = claude_path
+    popen_cmd[0] = claude_glm_path
 
     process = subprocess.Popen(
         popen_cmd,
@@ -340,15 +338,15 @@ def safe_coder_command(
             for line in gen:
                 process_line(line)
     """
-    # 查找 claude CLI 路径
-    claude_path = shutil.which('claude')
-    if not claude_path:
+    # 查找 claude-glm CLI 路径
+    claude_glm_path = shutil.which('claude-glm')
+    if not claude_glm_path:
         raise CommandNotFoundError(
-            "未找到 claude CLI。请确保已安装 Claude Code CLI 并添加到 PATH。\n"
-            "安装指南：https://docs.anthropic.com/en/docs/claude-code"
+            "未找到 claude-glm CLI。请确保已安装 claude-glm 并添加到 PATH。\n"
+            "安装方式：参考你的 claude-glm 封装项目"
         )
     popen_cmd = cmd.copy()
-    popen_cmd[0] = claude_path
+    popen_cmd[0] = claude_glm_path
 
     process = subprocess.Popen(
         popen_cmd,
@@ -638,34 +636,15 @@ async def coder_tool(
     # 初始化指标收集器
     metrics = MetricsCollector(tool="coder", prompt=PROMPT, sandbox=sandbox)
 
-    # 获取配置并构建环境变量
-    try:
-        config = get_config()
-        env = build_coder_env(config)
-    except Exception as e:
-        error_msg = f"配置加载失败：{e}"
-        metrics.finish(success=False, error_kind=ErrorKind.CONFIG_ERROR)
-        if log_metrics:
-            metrics.log_to_stderr()
-
-        result: Dict[str, Any] = {
-            "success": False,
-            "tool": "coder",
-            "error": error_msg,
-            "error_kind": ErrorKind.CONFIG_ERROR,
-            "error_detail": _build_error_detail(error_msg),
-        }
-        if return_metrics:
-            result["metrics"] = metrics.to_dict()
-        return result
+    # 构建环境变量（直接复制，不注入配置）
+    env = os.environ.copy()
 
     # 构建命令（按逻辑分层排序）
     cmd = [
-        "claude",
+        "claude-glm",
         "-p",                                    # 1. 运行模式
         "--output-format", "stream-json",        # 2. 输出格式（流式 JSON，支持中间状态）
         "--verbose",                             # 3. stream-json 在 -p 模式下需要 --verbose
-        "--setting-sources", "project",          # 4. 设置源（仅加载项目级设置）
     ]
 
     # 5. 安全策略

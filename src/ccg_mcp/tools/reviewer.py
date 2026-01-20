@@ -1,13 +1,14 @@
-"""Gemini 工具实现
+"""Codex 工具实现
 
-调用 Gemini CLI 进行代码执行、技术咨询或代码审核。
-Gemini 是多面手，权限灵活，由 Claude 按场景控制。
+调用 Codex 进行代码审核。
+复用 CodexMCP 的核心逻辑。
 """
 
 from __future__ import annotations
 
 import json
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -143,21 +144,20 @@ class MetricsCollector:
 # 命令执行
 # ============================================================================
 
-def run_gemini_command(
+def run_reviewer_command(
     cmd: list[str],
+    cwd: Path | None = None,
     timeout: int = 300,
     max_duration: int = 1800,
     prompt: str = "",
-    cwd: Optional[Path] = None,
 ) -> Generator[str, None, tuple[Optional[int], int]]:
-    """执行 Gemini 命令并流式返回输出
+    """执行 Codex 命令并流式返回输出
 
     Args:
         cmd: 命令和参数列表
         timeout: 空闲超时（秒），无输出超过此时间触发超时，默认 300 秒（5 分钟）
         max_duration: 总时长硬上限（秒），默认 1800 秒（30 分钟），0 表示无限制
         prompt: 通过 stdin 传递的 prompt 内容
-        cwd: 工作目录
 
     Yields:
         输出行
@@ -166,7 +166,7 @@ def run_gemini_command(
         (exit_code, raw_output_lines) 元组
 
     Raises:
-        CommandNotFoundError: gemini CLI 未安装时抛出
+        CommandNotFoundError: codex CLI 未安装时抛出
         CommandTimeoutError: 命令执行超时时抛出
     """
     gemini_path = shutil.which('gemini')
@@ -187,7 +187,7 @@ def run_gemini_command(
         universal_newlines=True,
         encoding='utf-8',
         errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
-        cwd=str(cwd) if cwd else None,
+        cwd=cwd,
     )
 
     # 通过 stdin 传递 prompt，然后关闭 stdin
@@ -212,7 +212,6 @@ def run_gemini_command(
         """检查是否回合完成"""
         try:
             data = json.loads(line)
-            # Gemini CLI 使用 turn.completed 表示回合完成
             return data.get("type") == "turn.completed"
         except (json.JSONDecodeError, AttributeError, TypeError):
             return False
@@ -248,7 +247,7 @@ def run_gemini_command(
         # 检查总时长硬上限（优先级高）
         if max_duration > 0 and (now - start_time) >= max_duration:
             timeout_error = CommandTimeoutError(
-                f"gemini 执行超时（总时长超过 {max_duration}s），进程已终止。",
+                f"codex 执行超时（总时长超过 {max_duration}s），进程已终止。",
                 is_idle=False
             )
             break
@@ -256,7 +255,7 @@ def run_gemini_command(
         # 检查空闲超时
         if (now - last_activity_time) >= timeout:
             timeout_error = CommandTimeoutError(
-                f"gemini 空闲超时（{timeout}s 无输出），进程已终止。",
+                f"codex 空闲超时（{timeout}s 无输出），进程已终止。",
                 is_idle=True
             )
             break
@@ -296,7 +295,7 @@ def run_gemini_command(
             process.wait()
         # 进程等待超时（罕见情况），视为总时长超时
         timeout_error = CommandTimeoutError(
-            f"gemini 进程等待超时，进程已终止。",
+            f"codex 进程等待超时，进程已终止。",
             is_idle=False
         )
     finally:
@@ -319,19 +318,19 @@ def run_gemini_command(
 
 
 @contextmanager
-def safe_gemini_command(
+def safe_reviewer_command(
     cmd: list[str],
+    cwd: Path | None = None,
     timeout: int = 300,
     max_duration: int = 1800,
     prompt: str = "",
-    cwd: Optional[Path] = None,
 ) -> Iterator[Generator[str, None, tuple[Optional[int], int]]]:
-    """安全执行 Gemini 命令的上下文管理器
+    """安全执行 Codex 命令的上下文管理器
 
     确保在任何情况下（包括异常）都能正确清理子进程。
 
     用法:
-        with safe_gemini_command(cmd, timeout, max_duration, prompt, cwd) as gen:
+        with safe_reviewer_command(cmd, timeout, max_duration, prompt) as gen:
             for line in gen:
                 process_line(line)
     """
@@ -353,7 +352,7 @@ def safe_gemini_command(
         universal_newlines=True,
         encoding='utf-8',
         errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
-        cwd=str(cwd) if cwd else None,
+        cwd=cwd,
     )
 
     thread: Optional[threading.Thread] = None
@@ -444,14 +443,14 @@ def safe_gemini_command(
 
                 if max_duration > 0 and (now - start_time) >= max_duration:
                     timeout_error = CommandTimeoutError(
-                        f"gemini 执行超时（总时长超过 {max_duration}s），进程已终止。",
+                        f"codex 执行超时（总时长超过 {max_duration}s），进程已终止。",
                         is_idle=False
                     )
                     break
 
                 if (now - last_activity_time) >= timeout:
                     timeout_error = CommandTimeoutError(
-                        f"gemini 空闲超时（{timeout}s 无输出），进程已终止。",
+                        f"codex 空闲超时（{timeout}s 无输出），进程已终止。",
                         is_idle=True
                     )
                     break
@@ -482,7 +481,7 @@ def safe_gemini_command(
                     process.kill()
                     process.wait()
                 timeout_error = CommandTimeoutError(
-                    f"gemini 进程等待超时，进程已终止。",
+                    f"codex 进程等待超时，进程已终止。",
                     is_idle=False
                 )
             finally:
@@ -514,7 +513,7 @@ def safe_gemini_command(
 def _filter_last_lines(lines: list[str], max_lines: int = 50) -> list[str]:
     """过滤 last_lines，脱敏 tool_result 中的大内容
 
-    Gemini 的 JSONL 格式：tool_result 是独立的事件类型（type == "tool_result"）。
+    Codex 的 JSONL 格式：tool_result 在 item.type 中。
     这里只脱敏 tool_result 的 content 字段，保留消息结构和所有其他上下文。
     """
     import copy
@@ -522,13 +521,13 @@ def _filter_last_lines(lines: list[str], max_lines: int = 50) -> list[str]:
     for line in lines:
         try:
             data = json.loads(line)
-            event_type = data.get("type", "")
+            item = data.get("item", {})
 
             # 脱敏 tool_result 内容
-            if event_type == "tool_result":
+            if item.get("type") == "tool_result":
                 data = copy.deepcopy(data)
-                if "content" in data:
-                    data["content"] = "[truncated]"
+                if "content" in data["item"]:
+                    data["item"]["content"] = "[truncated]"
                 filtered.append(json.dumps(data, ensure_ascii=False))
                 continue
 
@@ -576,66 +575,38 @@ def _build_error_detail(
 
 
 # ============================================================================
-# 可重试错误判断
-# ============================================================================
-
-def _is_auth_error(text: str) -> bool:
-    """检测是否为认证错误
-
-    检查文本中是否包含认证相关的特征字符串（不区分大小写）。
-    """
-    text_lower = text.lower()
-    auth_keywords = [
-        "waiting for auth",
-        "failed to login",
-        "precondition check failed",
-        "authentication",
-        "401",
-        "403",
-        "unauthorized",
-        "not authenticated",
-        "login required",
-        "sign in",
-        "oauth",
-    ]
-    return any(keyword in text_lower for keyword in auth_keywords)
-
-
-def _is_retryable_error(error_kind: Optional[str], err_message: str) -> bool:
-    """判断错误是否可以重试
-
-    Gemini 默认 yolo 模式，大部分错误都可以安全重试。
-    排除：命令不存在（需要用户干预）、认证错误（需要用户登录）
-    """
-    if error_kind == ErrorKind.COMMAND_NOT_FOUND:
-        return False
-    if error_kind == ErrorKind.AUTH_REQUIRED:
-        return False
-    # 其他错误都可以重试
-    return True
-
-
-# ============================================================================
 # 主工具函数
 # ============================================================================
 
-async def gemini_tool(
-    PROMPT: Annotated[str, "任务指令，需提供充分背景信息"],
+async def reviewer_tool(
+    PROMPT: Annotated[str, "审核任务描述"],
     cd: Annotated[Path, "工作目录"],
     sandbox: Annotated[
         Literal["read-only", "workspace-write", "danger-full-access"],
-        Field(description="沙箱策略，默认允许写工作区"),
-    ] = "workspace-write",
-    yolo: Annotated[
-        bool,
-        Field(description="无需审批运行所有命令（跳过沙箱），默认 true"),
-    ] = True,
+        Field(description="沙箱策略，默认只读"),
+    ] = "read-only",
     SESSION_ID: Annotated[str, "会话 ID，用于多轮对话"] = "",
+    skip_git_repo_check: Annotated[
+        bool,
+        "允许在非 Git 仓库中运行",
+    ] = True,
     return_all_messages: Annotated[bool, "是否返回完整消息"] = False,
     return_metrics: Annotated[bool, "是否在返回值中包含指标数据"] = False,
+    image: Annotated[
+        Optional[List[Path]],
+        Field(description="附加图片文件路径列表"),
+    ] = None,
     model: Annotated[
         str,
-        Field(description="指定模型版本"),
+        Field(description="指定模型，默认使用 Reviewer 自己的配置"),
+    ] = "",
+    yolo: Annotated[
+        bool,
+        Field(description="无需审批运行所有命令（跳过沙箱）"),
+    ] = False,
+    profile: Annotated[
+        str,
+        "从 ~/.reviewer/config.toml 加载的配置文件名称",
     ] = "",
     timeout: Annotated[
         int,
@@ -645,62 +616,64 @@ async def gemini_tool(
         int,
         Field(description="总时长硬上限（秒），默认 1800 秒（30 分钟），0 表示无限制"),
     ] = 1800,
-    max_retries: Annotated[int, "最大重试次数，默认 1"] = 1,
+    max_retries: Annotated[int, "最大重试次数，默认 1（Reviewer 只读可安全重试）"] = 1,
     log_metrics: Annotated[bool, "是否将指标输出到 stderr"] = False,
 ) -> Dict[str, Any]:
-    """执行 Gemini 任务
+    """执行 Reviewer (Gemini) 代码审核
 
-    调用 Gemini CLI 进行代码执行、技术咨询或代码审核。
+    调用 Gemini 进行代码审核。
 
-    **角色定位**：多面手（与 Claude、Codex 同等级别的顶级 AI 专家）
-    - 🧠 高阶顾问：架构设计、技术选型、复杂方案讨论
-    - ⚖️ 独立审核：代码 Review、方案评审、质量把关
-    - 🔨 代码执行：原型开发、功能实现（尤其擅长前端/UI）
+    **角色定位**：代码审核者
+    - 检查代码质量（可读性、可维护性、潜在 bug）
+    - 评估需求完成度
+    - 给出明确结论：✅ 通过 / ⚠️ 建议优化 / ❌ 需要修改
 
-    **使用场景**：
-    - 用户明确要求使用 Gemini
-    - 需要第二意见或独立视角
-    - 架构设计和技术讨论
-    - 前端/UI 原型开发
-
-    **注意**：Gemini 权限灵活，默认 yolo=true，由 Claude 按场景控制
-    **重试策略**：默认允许 1 次重试
+    **注意**：Reviewer 仅审核，严禁修改代码，默认 sandbox 为 read-only
+    **重试策略**：Reviewer 默认允许 1 次重试（只读操作无副作用）
     """
     # 初始化指标收集器
-    sandbox_str = "yolo" if yolo else sandbox
-    metrics = MetricsCollector(tool="gemini", prompt=PROMPT, sandbox=sandbox_str)
+    metrics = MetricsCollector(tool="reviewer", prompt=PROMPT, sandbox=sandbox)
 
-    # 构建命令
-    # gemini CLI 命令格式: gemini [options]
-    # 使用 -y/--yolo 跳过确认，--sandbox 启用沙箱
-    # 参考: https://geminicli.com/docs/cli/headless/
-    cmd = ["gemini"]
+    # 归一化可选参数
+    image_list = image or []
 
-    # 添加流式 JSON 输出格式（用于 headless mode）
-    cmd.extend(["--output-format", "stream-json"])
+    # 构建命令（gemini CLI 格式）
+    cmd = ["gemini", "-o", "stream-json"]
 
-    # 注意：gemini CLI 没有 --dir 参数，使用 --include-directories 或依赖 cwd
-    # 工作目录通过 subprocess 的 cwd 参数设置
-
-    # 设置沙箱模式和审批模式
-    if yolo:
-        # yolo 模式：自动批准所有操作
+    # 处理沙箱策略
+    if sandbox == "read-only":
+        # Gemini 默认就是只读，不需要额外参数
+        pass
+    elif sandbox == "workspace-write":
+        # Gemini 需要 --yolo 允许写操作
         cmd.append("--yolo")
-    else:
-        # 非 yolo 模式：根据 sandbox 设置
-        if sandbox == "read-only":
-            # read-only 需要启用 sandbox
-            cmd.append("--sandbox")
+    elif sandbox == "danger-full-access":
+        cmd.extend(["--yolo", "--approval-mode", "yolo"])
 
-    # 指定模型（默认使用 gemini-3-pro-preview）
-    model_to_use = model if model else "gemini-3-pro-preview"
-    cmd.extend(["--model", model_to_use])
+    # 注意：没有 --cd 参数，通过 subprocess.Popen(cwd=cd) 设置工作目录
 
-    # 会话恢复
+    # TODO: 处理 image 参数（需要确认 gemini 是否支持）
+    # if image_list:
+    #     cmd.extend(["--image", ",".join(str(p) for p in image_list)])
+
+    # TODO: 处理 model 参数（需要确认 gemini 的参数名）
+    # if model:
+    #     cmd.extend(["--model", model])
+
+    # 移除 profile 和 skip_git_repo_check（gemini CLI 不支持）
+    # if profile:
+    #     cmd.extend(["--profile", profile])
+
+    # if yolo:
+    #     cmd.append("--yolo")
+
+    # if skip_git_repo_check:
+    #     cmd.append("--skip-git-repo-check")
+
     if SESSION_ID:
-        cmd.extend(["--resume", SESSION_ID])
+        cmd.extend(["--resume", str(SESSION_ID)])
 
-    # PROMPT 通过 stdin 传递
+    # PROMPT 通过 stdin 传递，不再作为命令行参数
 
     # 执行循环（支持重试）
     retries = 0
@@ -712,7 +685,7 @@ async def gemini_tool(
         agent_messages = ""
         had_error = False
         err_message = ""
-        session_id: Optional[str] = None
+        thread_id: Optional[str] = None
         exit_code: Optional[int] = None
         raw_output_lines = 0
         json_decode_errors = 0
@@ -720,7 +693,7 @@ async def gemini_tool(
         last_lines: list[str] = []
 
         try:
-            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd) as gen:
+            with safe_reviewer_command(cmd, cwd=cd, timeout=timeout, max_duration=max_duration, prompt=PROMPT) as gen:
                 try:
                     for line in gen:
                         last_lines.append(line)
@@ -729,63 +702,36 @@ async def gemini_tool(
 
                         try:
                             line_dict = json.loads(line.strip())
+                            msg_type = line_dict.get("type", "")
 
-                            # stream-json 事件类型: init, message, tool_use, tool_result, error, result
-                            # 参考: https://geminicli.com/docs/cli/headless/
-                            event_type = line_dict.get("type", "")
-
-                            # 收集消息（脱敏 tool_result 内容）
+                            # 收集完整消息
                             if return_all_messages:
                                 import copy
                                 safe_dict = copy.deepcopy(line_dict)
-                                # Gemini 的 tool_result 是独立事件类型
-                                if event_type == "tool_result":
-                                    # 脱敏 content 字段
-                                    if "content" in safe_dict:
-                                        safe_dict["content"] = "[truncated]"
                                 all_messages.append(safe_dict)
 
-                            # 提取 message 事件中的内容
-                            if event_type == "message":
-                                # message 事件包含 role 和 content
-                                role = line_dict.get("role", "")
+                            # 从 init 消息提取 session_id
+                            if msg_type == "init":
+                                session_id = line_dict.get("session_id")
+
+                            # 从 assistant 消息提取文本（多轮对话拼接）
+                            elif msg_type == "message" and line_dict.get("role") == "assistant":
                                 content = line_dict.get("content", "")
-                                if role == "assistant" and content:
+                                if content:
                                     agent_messages += content
 
-                            # 提取 result 事件（最终统计）
-                            if event_type == "result":
-                                # result 事件包含 response 和统计信息
-                                response = line_dict.get("response", "")
-                                if response:
-                                    # 如果 result 中有完整响应，使用它
-                                    if not agent_messages:
-                                        agent_messages = response
-
-                            # 提取 session_id (Gemini 可能在 init 事件中返回)
-                            if event_type == "init":
-                                if line_dict.get("session_id") is not None:
-                                    session_id = line_dict.get("session_id")
-                                if line_dict.get("thread_id") is not None:
-                                    session_id = line_dict.get("thread_id")
-
-                            # 错误处理
-                            # 注意：AUTH_REQUIRED 优先级最高，一旦设置不再被覆盖
-                            if event_type == "error":
-                                had_error = True
-                                error_msg = line_dict.get("message", str(line_dict))
-                                err_message += "\n\n[gemini error] " + error_msg
-                                # 检查是否为认证错误（优先级高于 UPSTREAM_ERROR）
-                                if _is_auth_error(error_msg):
-                                    error_kind = ErrorKind.AUTH_REQUIRED
-                                elif error_kind != ErrorKind.AUTH_REQUIRED:
+                            # 检查是否完成（从 result 消息）
+                            elif msg_type == "result":
+                                status = line_dict.get("status")
+                                if status == "error":
+                                    had_error = True
+                                    err_message = line_dict.get("error", "Unknown error")
                                     error_kind = ErrorKind.UPSTREAM_ERROR
 
                         except json.JSONDecodeError:
-                            # JSON 解析失败，记录错误计数
+                            # JSON 解析失败记录但不影响成功判定
                             json_decode_errors += 1
-                            # 非 JSON 输出记录到日志但不作为响应内容
-                            # 避免将 CLI 警告/错误文本误认为成功结果
+                            err_message += "\n\n[json decode error] " + line
                             continue
 
                         except Exception as error:
@@ -809,7 +755,7 @@ async def gemini_tool(
 
             result: Dict[str, Any] = {
                 "success": False,
-                "tool": "gemini",
+                "tool": "reviewer",
                 "error": str(e),
                 "error_kind": ErrorKind.COMMAND_NOT_FOUND,
                 "error_detail": _build_error_detail(str(e)),
@@ -823,8 +769,8 @@ async def gemini_tool(
             error_kind = ErrorKind.IDLE_TIMEOUT if e.is_idle else ErrorKind.TIMEOUT
             had_error = True
             err_message = str(e)
-            success = False
-            # 超时可以重试
+            success = False  # 明确设置为失败
+            # 超时可以重试（Codex 只读）
             if retries < max_retries:
                 all_last_lines = last_lines.copy()
                 last_error = {
@@ -855,18 +801,17 @@ async def gemini_tool(
         if had_error:
             success = False
 
-        # Gemini 可能不返回 session_id，这不算失败
-        # if session_id is None:
-        #     success = False
-        #     if not error_kind:
-        #         error_kind = ErrorKind.PROTOCOL_MISSING_SESSION
-        #     err_message = "未能获取 SESSION_ID。\n\n" + err_message
+        if thread_id is None:
+            success = False
+            if not error_kind:
+                error_kind = ErrorKind.PROTOCOL_MISSING_SESSION
+            err_message = "未能获取 SESSION_ID。\n\n" + err_message
 
         if not agent_messages:
             success = False
             if not error_kind:
                 error_kind = ErrorKind.EMPTY_RESULT
-            err_message = "未能获取 Gemini 响应内容。可尝试设置 return_all_messages=True 获取详细信息。\n\n" + err_message
+            err_message = "未能获取 Codex 响应内容。可尝试设置 return_all_messages=True 获取详细信息。\n\n" + err_message
 
         # 检查退出码
         if exit_code is not None and exit_code != 0 and success:
@@ -879,8 +824,8 @@ async def gemini_tool(
             # 成功，跳出重试循环
             break
         else:
-            # 检查是否可重试
-            if _is_retryable_error(error_kind, err_message) and retries < max_retries:
+            # 简化的重试逻辑：除了命令不存在，其他都重试
+            if error_kind != ErrorKind.COMMAND_NOT_FOUND and retries < max_retries:
                 all_last_lines = last_lines.copy()
                 last_error = {
                     "error_kind": error_kind,
@@ -921,8 +866,8 @@ async def gemini_tool(
     if success:
         result = {
             "success": True,
-            "tool": "gemini",
-            "SESSION_ID": session_id,
+            "tool": "reviewer",
+            "SESSION_ID": thread_id,
             "result": agent_messages,
             "duration": metrics.format_duration(),
         }
@@ -935,21 +880,21 @@ async def gemini_tool(
             json_decode_errors = last_error["json_decode_errors"]
 
         # 如果是认证错误，添加友好提示
+        final_error = err_message
         if error_kind == ErrorKind.AUTH_REQUIRED:
-            auth_hint = """请先登录 Gemini CLI。运行以下命令完成认证：
-  gemini
-
-然后在交互界面中选择 "Login with Google" 完成登录。
-
-或使用 API Key 认证（设置环境变量 GEMINI_API_KEY）。
-
-"""
-            err_message = auth_hint + err_message
+            final_error = (
+                "请先登录 Codex CLI。运行以下命令完成认证：\n"
+                "  codex login\n"
+                "\n"
+                "或使用 API Key 认证：\n"
+                "  printenv OPENAI_API_KEY | codex login --with-api-key\n"
+                "\n" + err_message
+            )
 
         result = {
             "success": False,
-            "tool": "gemini",
-            "error": err_message,
+            "tool": "reviewer",
+            "error": final_error,
             "error_kind": error_kind,
             "error_detail": _build_error_detail(
                 message=err_message.split('\n')[0] if err_message else "未知错误",

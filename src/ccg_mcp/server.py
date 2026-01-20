@@ -1,6 +1,6 @@
-"""CCG-MCP 服务器主体
+"""Coder-Reviewer-MCP 服务器主体
 
-提供 coder、codex 和 gemini 三个 MCP 工具，实现多方协作。
+提供 coder 和 reviewer 两个 MCP 工具，实现多模型协作。
 """
 
 from __future__ import annotations
@@ -12,8 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ccg_mcp.tools.coder import coder_tool
-from ccg_mcp.tools.codex import codex_tool
-from ccg_mcp.tools.gemini import gemini_tool
+from ccg_mcp.tools.reviewer import reviewer_tool
 
 # 创建 MCP 服务器实例
 mcp = FastMCP("CCG-MCP Server")
@@ -22,15 +21,14 @@ mcp = FastMCP("CCG-MCP Server")
 @mcp.tool(
     name="coder",
     description="""
-    调用可配置的后端模型执行代码生成或修改任务。
+    调用 claude-glm (GLM-4.7) 执行代码生成或修改任务。
 
     **角色定位**：代码执行者
     - 根据精确的 Prompt 生成或修改代码
     - 执行批量代码任务
     - 成本低，执行力强
 
-    **可配置后端**：需要用户自行配置，推荐使用 GLM-4.7 作为参考案例，
-    也可选用其他支持 Claude Code API 的模型（如 Minimax、DeepSeek 等）。
+    **后端模型**：claude-glm CLI 封装的 GLM-4.7 模型。
 
     **使用场景**：
     - 新增功能：根据需求生成代码
@@ -86,9 +84,9 @@ async def coder(
 
 
 @mcp.tool(
-    name="codex",
+    name="reviewer",
     description="""
-    调用 Codex 进行代码审核。
+    调用 Gemini 进行代码审核。
 
     **角色定位**：代码审核者
     - 检查代码质量（可读性、可维护性、潜在 bug）
@@ -96,11 +94,11 @@ async def coder(
     - 给出明确结论：✅ 通过 / ⚠️ 建议优化 / ❌ 需要修改
 
     **使用场景**：
-    - Coder 完成代码后，调用 Codex 进行质量审核
+    - Coder 完成代码后，调用 Reviewer 进行质量审核
     - 需要独立第三方视角时
     - 代码合入前的最终检查
 
-    **注意**：Codex 仅审核，严禁修改代码，默认 sandbox 为 read-only
+    **注意**：Reviewer 仅审核，严禁修改代码，默认 sandbox 为 read-only
 
     **Prompt 模板**：
     ```
@@ -118,7 +116,7 @@ async def coder(
     ```
     """,
 )
-async def codex(
+async def reviewer(
     PROMPT: Annotated[str, "审核任务描述"],
     cd: Annotated[Path, "工作目录"],
     sandbox: Annotated[
@@ -138,7 +136,7 @@ async def codex(
     ] = None,
     model: Annotated[
         str,
-        Field(description="指定模型，默认使用 Codex 自己的配置"),
+        Field(description="指定模型，默认使用 Reviewer 自己的配置"),
     ] = "",
     yolo: Annotated[
         bool,
@@ -146,15 +144,15 @@ async def codex(
     ] = False,
     profile: Annotated[
         str,
-        "从 ~/.codex/config.toml 加载的配置文件名称",
+        "从 ~/.reviewer/config.toml 加载的配置文件名称",
     ] = "",
     timeout: Annotated[int, "空闲超时（秒），无输出超过此时间触发超时，默认 300 秒"] = 300,
     max_duration: Annotated[int, "总时长硬上限（秒），默认 1800 秒（30 分钟），0 表示无限制"] = 1800,
-    max_retries: Annotated[int, "最大重试次数，默认 1（Codex 只读可安全重试）"] = 1,
+    max_retries: Annotated[int, "最大重试次数，默认 1（Reviewer 只读可安全重试）"] = 1,
     log_metrics: Annotated[bool, "是否将指标输出到 stderr"] = False,
 ) -> Dict[str, Any]:
-    """执行 Codex 代码审核"""
-    return await codex_tool(
+    """执行 Reviewer (Gemini) 代码审核"""
+    return await reviewer_tool(
         PROMPT=PROMPT,
         cd=cd,
         sandbox=sandbox,
@@ -166,78 +164,6 @@ async def codex(
         model=model,
         yolo=yolo,
         profile=profile,
-        timeout=timeout,
-        max_duration=max_duration,
-        max_retries=max_retries,
-        log_metrics=log_metrics,
-    )
-
-
-@mcp.tool(
-    name="gemini",
-    description="""
-    调用 Gemini CLI 进行代码执行、技术咨询或代码审核。
-
-    **角色定位**：多面手（与 Claude、Codex 同等级别的顶级 AI 专家）
-    - 高阶顾问：架构设计、技术选型、复杂方案讨论
-    - 独立审核：代码 Review、方案评审、质量把关
-    - 代码执行：原型开发、功能实现（尤其擅长前端/UI）
-
-    **使用场景**：
-    - 用户明确要求使用 Gemini
-    - 需要第二意见或独立视角
-    - 架构设计和技术讨论
-    - 前端/UI 原型开发
-
-    **注意**：Gemini 权限灵活，默认 yolo=true，由 Claude 按场景控制
-    **重试策略**：默认允许 1 次重试
-
-    **Prompt 模板**：
-    ```
-    请提供专业意见/执行以下任务：
-    **任务类型**：[咨询 / 审核 / 执行]
-    **背景信息**：[项目上下文]
-    **具体问题/任务**：
-    1. [问题/任务1]
-    2. [问题/任务2]
-    **期望输出**：
-    - [输出格式/内容要求]
-    ```
-    """,
-)
-async def gemini(
-    PROMPT: Annotated[str, "任务指令，需提供充分背景信息"],
-    cd: Annotated[Path, "工作目录"],
-    sandbox: Annotated[
-        Literal["read-only", "workspace-write", "danger-full-access"],
-        Field(description="沙箱策略，默认允许写工作区"),
-    ] = "workspace-write",
-    yolo: Annotated[
-        bool,
-        Field(description="无需审批运行所有命令（跳过沙箱），默认 true"),
-    ] = True,
-    SESSION_ID: Annotated[str, "会话 ID，用于多轮对话"] = "",
-    return_all_messages: Annotated[bool, "是否返回完整消息"] = False,
-    return_metrics: Annotated[bool, "是否在返回值中包含指标数据"] = False,
-    model: Annotated[
-        str,
-        Field(description="指定模型版本，默认使用 gemini-3-pro-preview"),
-    ] = "",
-    timeout: Annotated[int, "空闲超时（秒），无输出超过此时间触发超时，默认 300 秒"] = 300,
-    max_duration: Annotated[int, "总时长硬上限（秒），默认 1800 秒（30 分钟），0 表示无限制"] = 1800,
-    max_retries: Annotated[int, "最大重试次数，默认 1"] = 1,
-    log_metrics: Annotated[bool, "是否将指标输出到 stderr"] = False,
-) -> Dict[str, Any]:
-    """执行 Gemini 任务"""
-    return await gemini_tool(
-        PROMPT=PROMPT,
-        cd=cd,
-        sandbox=sandbox,
-        yolo=yolo,
-        SESSION_ID=SESSION_ID,
-        return_all_messages=return_all_messages,
-        return_metrics=return_metrics,
-        model=model,
         timeout=timeout,
         max_duration=max_duration,
         max_retries=max_retries,

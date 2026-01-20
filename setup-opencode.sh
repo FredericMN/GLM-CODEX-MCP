@@ -1,7 +1,11 @@
 #!/bin/bash
-# CCG OpenCode Setup Script for macOS
+# CCG OpenCode Setup Script for macOS (macOS-only)
 # This script configures Oh-My-OpenCode with CCG multi-agent collaboration
-# NOTE: This script only supports macOS. For Windows, use setup-opencode.ps1
+#
+# Supported platforms:
+#   - macOS (this script)
+#   - Windows: use setup-opencode.ps1 or setup-opencode.bat
+#   - Linux: not supported (please install manually following README instructions)
 set -euo pipefail
 
 # Color codes for output
@@ -178,17 +182,33 @@ if [ "$SKIP_OH_MY_INSTALL" = false ]; then
 
     case $SUBSCRIPTION_CHOICE in
         1)
-            bunx oh-my-opencode install --no-tui --claude=max20 --chatgpt=yes --gemini=yes
+            if ! bunx oh-my-opencode install --no-tui --claude=max20 --chatgpt=yes --gemini=yes; then
+                write_error "Failed to install Oh-My-OpenCode"
+                echo "Please try running manually: bunx oh-my-opencode install"
+                exit 1
+            fi
             ;;
         2)
-            bunx oh-my-opencode install --no-tui --claude=yes --chatgpt=yes --gemini=yes
+            if ! bunx oh-my-opencode install --no-tui --claude=yes --chatgpt=yes --gemini=yes; then
+                write_error "Failed to install Oh-My-OpenCode"
+                echo "Please try running manually: bunx oh-my-opencode install"
+                exit 1
+            fi
             ;;
         3)
-            bunx oh-my-opencode install
+            if ! bunx oh-my-opencode install; then
+                write_error "Failed to install Oh-My-OpenCode"
+                echo "Please try running manually: bunx oh-my-opencode install"
+                exit 1
+            fi
             ;;
         *)
             write_warning "Invalid choice, using default (Claude Max 20)"
-            bunx oh-my-opencode install --no-tui --claude=max20 --chatgpt=yes --gemini=yes
+            if ! bunx oh-my-opencode install --no-tui --claude=max20 --chatgpt=yes --gemini=yes; then
+                write_error "Failed to install Oh-My-OpenCode"
+                echo "Please try running manually: bunx oh-my-opencode install"
+                exit 1
+            fi
             ;;
     esac
 
